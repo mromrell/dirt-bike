@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Dirt Bike Racing</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #111;
+  font-family: 'Courier New', Courier, monospace;
+  touch-action: none;
+}
+#wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100vw;
+  height: 100vh;
+}
+canvas { display: block; image-rendering: pixelated; }
+#hud {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: rgba(0,0,0,0.7);
+  color: #fff;
+  font-size: 14px;
+  font-weight: bold;
+  pointer-events: none;
+  z-index: 10;
+}
+#hud span { text-shadow: 1px 1px 0 #000; }
+#controls {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 10px 16px 14px;
+  pointer-events: none;
+  z-index: 10;
+}
+.ctrl-side { display: flex; gap: 8px; pointer-events: all; }
+.btn {
+  width: 68px; height: 68px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.5);
+  background: rgba(0,0,0,0.4);
+  color: #fff;
+  font-size: 22px;
+  display: flex; align-items: center; justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+  touch-action: none;
+  transition: background 0.08s;
+}
+.btn.pressed { background: rgba(255,255,255,0.35); }
+#overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.88);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  gap: 16px;
+  z-index: 20;
+}
+#overlay h1 { font-size: 52px; color: #f90; text-shadow: 0 0 24px #f90, 0 0 8px #fa0; letter-spacing: 4px; }
+#overlay h2 { font-size: 24px; color: #ddd; letter-spacing: 2px; }
+#overlay p { font-size: 14px; color: #aaa; text-align: center; line-height: 1.8; max-width: 300px; }
+#startBtn {
+  margin-top: 8px;
+  padding: 14px 44px;
+  font-size: 22px;
+  font-family: 'Courier New', monospace;
+  font-weight: bold;
+  background: #f90;
+  border: none;
+  border-radius: 8px;
+  color: #000;
+  cursor: pointer;
+  letter-spacing: 2px;
+  box-shadow: 0 0 20px #f905;
+}
+#startBtn:active { background: #fb0; }
+#result {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.85);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  gap: 18px;
+  z-index: 20;
+}
+#result h1 { font-size: 44px; letter-spacing: 3px; }
+#result p { font-size: 18px; color: #ccc; }
+#resultPos { font-size: 72px; font-weight: bold; }
+#restartBtn {
+  padding: 12px 36px;
+  font-size: 20px;
+  font-family: 'Courier New', monospace;
+  font-weight: bold;
+  background: #f90;
+  border: none;
+  border-radius: 8px;
+  color: #000;
+  cursor: pointer;
+  letter-spacing: 2px;
+}
+#restartBtn:active { background: #fb0; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+
+<div id="hud">
+  <span id="hudLap">LAP 1/3</span>
+  <span id="hudPos">POS 6/6</span>
+  <span id="hudSpd">0 MPH</span>
+</div>
+
+<div id="controls">
+  <div class="ctrl-side">
+    <div class="btn" id="btnL">&#9664;</div>
+    <div class="btn" id="btnR">&#9654;</div>
+  </div>
+  <div class="ctrl-side">
+    <div class="btn" id="btnB">&#9660;</div>
+    <div class="btn" id="btnA">&#9650;</div>
+  </div>
+</div>
+
+<div id="overlay">
+  <h1>DIRT BIKE</h1>
+  <h2>RACING</h2>
+  <p>Race 3 laps &amp; pass all the riders!<br>Arrow keys or on-screen buttons.</p>
+  <button id="startBtn">START RACE</button>
+</div>
+
+<div id="result">
+  <h1 id="resultTitle">FINISHED!</h1>
+  <p>You finished in position</p>
+  <div id="resultPos">1st</div>
+  <p id="resultMsg"></p>
+  <button id="restartBtn">RACE AGAIN</button>
+</div>
+
+<script>
+"use strict";
+
+// ─── CANVAS SETUP ───────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width  = W;
+  canvas.height = H;
+}
+window.addEventListener('resize', () => { resize(); if (trackReady) buildTrack(); });
+resize();
+
+// ─── TRACK CONTROL POINTS (normalised 0–1) ─────────────────────────────────
+// A roughly kidney-bean-shaped dirt circuit with a chicane on the left
+const CTRL_NORM = [
+  [0.50, 0.90],  //  0  start/finish  (bottom-centre)
+  [0.70, 0.90],  //  1  bottom-right straight
+  [0.84, 0.82],  //  2  turn 1 entry
+  [0.91, 0.68],  //  3  turn 1 apex
+  [0.91, 0.52],  //  4  right straight upper
+  [0.87, 0.36],  //  5  hairpin entry
+  [0.80, 0.22],  //  6  hairpin
+  [0.68, 0.13],  //  7  hairpin exit
+  [0.52, 0.10],  //  8  top straight
+  [0.36, 0.13],  //  9  top-left
+  [0.22, 0.24],  // 10  left sweeper
+  [0.13, 0.40],  // 11  left chicane in
+  [0.18, 0.54],  // 12  left chicane out
+  [0.12, 0.68],  // 13  left lower
+  [0.20, 0.83],  // 14  bottom-left corner
+  [0.34, 0.90],  // 15  bottom straight
+];
+
+const STEPS_PER_SEG = 10;   // catmull-rom subdivisions
+const TRACK_W       = 82;   // pixels (on full canvas)
+let   WAYPOINTS     = [];   // [{x,y}]
+let   EDGES         = [];   // [{cx,cy, lx,ly, rx,ry, angle}]
+let   trackReady    = false;
+
+function catmull(p0, p1, p2, p3, t) {
+  const t2 = t*t, t3 = t2*t;
+  return [
+    0.5*((2*p1[0])+(-p0[0]+p2[0])*t+(2*p0[0]-5*p1[0]+4*p2[0]-p3[0])*t2+(-p0[0]+3*p1[0]-3*p2[0]+p3[0])*t3),
+    0.5*((2*p1[1])+(-p0[1]+p2[1])*t+(2*p0[1]-5*p1[1]+4*p2[1]-p3[1])*t2+(-p0[1]+3*p1[1]-3*p2[1]+p3[1])*t3),
+  ];
+}
+
+function buildTrack() {
+  WAYPOINTS = [];
+  const pts = CTRL_NORM;
+  const n   = pts.length;
+  // Scale control points to canvas
+  const scaled = pts.map(p => [p[0]*W, p[1]*H]);
+
+  for (let i = 0; i < n; i++) {
+    const p0 = scaled[(i-1+n)%n];
+    const p1 = scaled[i];
+    const p2 = scaled[(i+1)%n];
+    const p3 = scaled[(i+2)%n];
+    for (let s = 0; s < STEPS_PER_SEG; s++) {
+      WAYPOINTS.push(catmull(p0,p1,p2,p3, s/STEPS_PER_SEG));
+    }
+  }
+
+  const tw  = TRACK_W * Math.min(W/800, 1.4);
+  const nwp = WAYPOINTS.length;
+  EDGES = WAYPOINTS.map((wp, i) => {
+    const nx = WAYPOINTS[(i+1)%nwp];
+    const dx = nx[0]-wp[0], dy = nx[1]-wp[1];
+    const a  = Math.atan2(dy, dx);
+    const d  = Math.sqrt(dx*dx+dy*dy)||1;
+    const perp = [-dy/d*(tw/2), dx/d*(tw/2)];
+    return {
+      cx: wp[0], cy: wp[1],
+      lx: wp[0]-perp[0], ly: wp[1]-perp[1],
+      rx: wp[0]+perp[0], ry: wp[1]+perp[1],
+      angle: a, tw
+    };
+  });
+  trackReady = true;
+}
+
+// ─── RACER ──────────────────────────────────────────────────────────────────
+const LAPS    = 3;
+const NUM_AI  = 5;
+const COLORS  = ['#e33','#f80','#2a2','#66f','#c3c'];
+
+class Racer {
+  constructor(wpIdx, side, isPlayer, color, topSpd) {
+    const e   = EDGES[wpIdx];
+    const off = side * e.tw * 0.28;
+    this.x    = e.cx + Math.cos(e.angle+Math.PI/2)*off;
+    this.y    = e.cy + Math.sin(e.angle+Math.PI/2)*off;
+    this.angle   = e.angle;
+    this.speed   = 0;
+    this.topSpd  = topSpd;
+    this.isPlayer= isPlayer;
+    this.color   = color;
+    this.wpIdx   = wpIdx;
+    this.lap     = 1;
+    this.finished= false;
+    this.finishT = 0;
+    this.dust    = [];
+    this.onTrack = true;
+  }
+
+  get progress() {
+    return (this.lap-1)*WAYPOINTS.length + this.wpIdx;
+  }
+
+  nearestEdge() {
+    // return nearest edge within a small window
+    let best = this.wpIdx, bd = Infinity;
+    for (let d = -6; d <= 6; d++) {
+      const i = (this.wpIdx + d + WAYPOINTS.length) % WAYPOINTS.length;
+      const dx = this.x - EDGES[i].cx, dy = this.y - EDGES[i].cy;
+      const dd = dx*dx + dy*dy;
+      if (dd < bd) { bd = dd; best = i; }
+    }
+    return best;
+  }
+
+  update(accel, brake, turnL, turnR) {
+    if (this.finished) return;
+
+    // turn rate scales with speed
+    const tr = 0.044 * Math.max(0.3, Math.min(1, Math.abs(this.speed)/3));
+    if (turnL) this.angle -= tr;
+    if (turnR) this.angle += tr;
+
+    const onTrkBoost = this.onTrack ? 1.0 : 0.45;
+    const effTop = this.topSpd * onTrkBoost;
+
+    if (accel) {
+      this.speed += 0.13;
+      if (this.speed > effTop) this.speed = effTop;
+    } else if (brake) {
+      this.speed -= 0.18;
+      if (this.speed < -effTop*0.35) this.speed = -effTop*0.35;
+    } else {
+      this.speed *= 0.984;
+    }
+    if (!this.onTrack) this.speed *= 0.97;
+
+    this.x += Math.cos(this.angle) * this.speed;
+    this.y += Math.sin(this.angle) * this.speed;
+
+    // dust particles when moving fast
+    if (Math.abs(this.speed) > 2) {
+      this.dust.push({
+        x: this.x - Math.cos(this.angle)*10,
+        y: this.y - Math.sin(this.angle)*10,
+        vx: (Math.random()-0.5)*1.2 - Math.cos(this.angle)*0.5,
+        vy: (Math.random()-0.5)*1.2 - Math.sin(this.angle)*0.5,
+        life: 1.0,
+        r: 3+Math.random()*3
+      });
+    }
+    this.dust = this.dust.filter(d => {
+      d.x += d.vx; d.y += d.vy; d.life -= 0.05; return d.life > 0;
+    });
+
+    this.updateWP();
+  }
+
+  updateWP() {
+    const nwp = WAYPOINTS.length;
+    // look ahead up to 4 waypoints
+    for (let ahead = 1; ahead <= 4; ahead++) {
+      const ni  = (this.wpIdx + ahead) % nwp;
+      const wp  = WAYPOINTS[ni];
+      const dx  = this.x - wp[0], dy = this.y - wp[1];
+      if (dx*dx + dy*dy < 52*52) {
+        // lap check: wrapped around finish line?
+        if (ni < this.wpIdx && this.wpIdx > nwp*0.75) {
+          if (!this.finished) {
+            this.lap++;
+            if (this.lap > LAPS) {
+              this.finished = true;
+              this.finishT  = performance.now();
+            }
+          }
+        }
+        this.wpIdx = ni;
+        break;
+      }
+    }
+
+    // on-track check
+    const ei  = this.nearestEdge();
+    const e   = EDGES[ei];
+    const dx  = this.x - e.cx, dy = this.y - e.cy;
+    const tw  = e.tw;
+    this.onTrack = (dx*dx + dy*dy) < (tw/2 + 12)*(tw/2 + 12);
+  }
+
+  draw() {
+    // dust
+    for (const d of this.dust) {
+      ctx.globalAlpha = d.life * 0.45;
+      ctx.fillStyle   = '#b8956a';
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.r, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.angle + Math.PI/2);
+
+    const W2 = 9, H2 = 17;
+
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(-W2/2+2, -H2/2+2, W2, H2);
+
+    // body
+    ctx.fillStyle = this.color;
+    ctx.fillRect(-W2/2, -H2/2, W2, H2);
+
+    // seat / rider helmet
+    ctx.fillStyle = this.isPlayer ? '#4af' : '#ddd';
+    ctx.fillRect(-W2/2+1, -H2/2+2, W2-2, 6);
+
+    // front wheel
+    ctx.fillStyle = '#111';
+    ctx.fillRect(-W2/2-2, -H2/2, 3, 7);
+    ctx.fillRect(W2/2-1,  -H2/2, 3, 7);
+
+    // rear wheel
+    ctx.fillStyle = '#111';
+    ctx.fillRect(-W2/2-2, H2/2-7, 3, 7);
+    ctx.fillRect(W2/2-1,  H2/2-7, 3, 7);
+
+    // headlight
+    ctx.fillStyle = '#ffe066';
+    ctx.fillRect(-W2/2+1, -H2/2-2, W2-2, 3);
+
+    if (this.isPlayer) {
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold 9px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText('YOU', 0, -H2/2-8);
+    }
+
+    ctx.restore();
+  }
+}
+
+// ─── AI LOGIC ───────────────────────────────────────────────────────────────
+function aiControl(ai) {
+  const nwp   = WAYPOINTS.length;
+  // Look 6 waypoints ahead for a smooth line
+  const tgtI  = (ai.wpIdx + 6) % nwp;
+  const tgt   = WAYPOINTS[tgtI];
+  const want  = Math.atan2(tgt[1]-ai.y, tgt[0]-ai.x);
+  let   diff  = want - ai.angle;
+  while (diff >  Math.PI) diff -= Math.PI*2;
+  while (diff < -Math.PI) diff += Math.PI*2;
+
+  const tL    = diff < -0.06;
+  const tR    = diff >  0.06;
+  const sharp = Math.abs(diff) > 0.6;
+  // AI accelerates unless turn is very sharp
+  return { accel: !sharp, brake: sharp, tL, tR };
+}
+
+// ─── GAME STATE ─────────────────────────────────────────────────────────────
+let player, aiList, allRacers;
+let gamePhase   = 'menu';   // menu | countdown | racing | done
+let cdTimer     = 3;
+let cdLast      = 0;
+let raceStarted = false;
+
+function ordinal(n) {
+  const s = ['th','st','nd','rd'];
+  const v = n%100;
+  return n + (s[(v-20)%10]||s[v]||s[0]);
+}
+
+function getPositions() {
+  return [...allRacers].sort((a,b) => b.progress - a.progress);
+}
+
+function initRace() {
+  buildTrack();
+  const nwp = WAYPOINTS.length;
+
+  // Grid positions (staggered, rear-most first = player)
+  // AI riders spread across a third of the track ahead of player
+  const spread = Math.floor(nwp / (NUM_AI + 2));
+  aiList = [];
+  for (let i = 0; i < NUM_AI; i++) {
+    const wpI = (i+1) * spread % nwp;
+    const side = (i%2===0) ? -1 : 1;
+    const spd  = 3.4 + i*0.28 + Math.random()*0.3;  // varied AI speeds
+    aiList.push(new Racer(wpI, side, false, COLORS[i], spd));
+  }
+  // Player at the back (wpIdx 0)
+  player = new Racer(0, 0, true, '#22aaff', 4.9);
+  allRacers = [player, ...aiList];
+
+  gamePhase = 'countdown';
+  cdTimer   = 3;
+  cdLast    = performance.now();
+  raceStarted = false;
+
+  document.getElementById('result').style.display = 'none';
+}
+
+// ─── INPUT ───────────────────────────────────────────────────────────────────
+const inp = { left:false, right:false, up:false, down:false };
+
+document.addEventListener('keydown', e => {
+  if (e.key==='ArrowLeft'||e.key==='a')  { inp.left  = true; e.preventDefault(); }
+  if (e.key==='ArrowRight'||e.key==='d') { inp.right = true; e.preventDefault(); }
+  if (e.key==='ArrowUp'||e.key==='w')    { inp.up    = true; e.preventDefault(); }
+  if (e.key==='ArrowDown'||e.key==='s')  { inp.down  = true; e.preventDefault(); }
+});
+document.addEventListener('keyup', e => {
+  if (e.key==='ArrowLeft'||e.key==='a')  inp.left  = false;
+  if (e.key==='ArrowRight'||e.key==='d') inp.right = false;
+  if (e.key==='ArrowUp'||e.key==='w')    inp.up    = false;
+  if (e.key==='ArrowDown'||e.key==='s')  inp.down  = false;
+});
+
+function bindBtn(id, key) {
+  const el = document.getElementById(id);
+  el.addEventListener('touchstart', e => { inp[key]=true;  el.classList.add('pressed');    e.preventDefault(); }, {passive:false});
+  el.addEventListener('touchend',   e => { inp[key]=false; el.classList.remove('pressed'); e.preventDefault(); }, {passive:false});
+  el.addEventListener('mousedown',  () => { inp[key]=true;  el.classList.add('pressed'); });
+  el.addEventListener('mouseup',    () => { inp[key]=false; el.classList.remove('pressed'); });
+  el.addEventListener('mouseleave', () => { inp[key]=false; el.classList.remove('pressed'); });
+}
+bindBtn('btnL','left'); bindBtn('btnR','right');
+bindBtn('btnA','up');   bindBtn('btnB','down');
+
+// ─── RENDER TRACK ────────────────────────────────────────────────────────────
+function drawTrack() {
+  const n = EDGES.length;
+
+  // grass background already drawn; draw infield green
+  // Draw track surface (dirt brown ring) using edge points
+  ctx.beginPath();
+  ctx.moveTo(EDGES[0].rx, EDGES[0].ry);
+  for (let i=1;i<n;i++) ctx.lineTo(EDGES[i].rx, EDGES[i].ry);
+  ctx.closePath();
+  // punch infield hole
+  ctx.moveTo(EDGES[0].lx, EDGES[0].ly);
+  for (let i=n-1;i>=0;i--) ctx.lineTo(EDGES[i].lx, EDGES[i].ly);
+  ctx.closePath();
+  ctx.fillStyle = '#9b6f2a';
+  ctx.fill('evenodd');
+
+  // Tyre ruts / texture lines
+  ctx.save();
+  ctx.strokeStyle = 'rgba(100,55,10,0.45)';
+  ctx.lineWidth   = 2;
+  ctx.setLineDash([6,14]);
+  ctx.beginPath();
+  ctx.moveTo(EDGES[0].cx, EDGES[0].cy);
+  for (let i=1;i<n;i++) ctx.lineTo(EDGES[i].cx, EDGES[i].cy);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // Outer kerb (white/red stripes)
+  for (let i=0;i<n;i+=2) {
+    const a = EDGES[i], b = EDGES[(i+1)%n];
+    ctx.beginPath();
+    ctx.moveTo(a.rx, a.ry);
+    ctx.lineTo(b.rx, b.ry);
+    ctx.strokeStyle = (Math.floor(i/2)%2===0) ? 'rgba(255,255,255,0.6)' : 'rgba(220,40,40,0.55)';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+  }
+  // Inner kerb
+  for (let i=0;i<n;i+=2) {
+    const a = EDGES[i], b = EDGES[(i+1)%n];
+    ctx.beginPath();
+    ctx.moveTo(a.lx, a.ly);
+    ctx.lineTo(b.lx, b.ly);
+    ctx.strokeStyle = (Math.floor(i/2)%2===0) ? 'rgba(255,255,255,0.5)' : 'rgba(220,40,40,0.45)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
+  // Start/finish line
+  const s = EDGES[0];
+  ctx.save();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth   = 5;
+  ctx.beginPath();
+  ctx.moveTo(s.lx, s.ly);
+  ctx.lineTo(s.rx, s.ry);
+  ctx.stroke();
+  // Checkered marks
+  ctx.fillStyle = '#000';
+  for (let t=0;t<=1;t+=0.25) {
+    const bx = s.lx + (s.rx-s.lx)*t;
+    const by = s.ly + (s.ry-s.ly)*t;
+    if (Math.floor(t*4)%2===0) {
+      ctx.fillRect(bx-4, by-4, 8, 8);
+    }
+  }
+  ctx.restore();
+
+  // Arrow showing direction of travel (near start)
+  const arwI = Math.floor(EDGES.length * 0.04);
+  const arw  = EDGES[arwI];
+  ctx.save();
+  ctx.translate(arw.cx, arw.cy);
+  ctx.rotate(arw.angle);
+  ctx.fillStyle  = 'rgba(255,255,255,0.6)';
+  ctx.beginPath();
+  ctx.moveTo(0,-8); ctx.lineTo(12,0); ctx.lineTo(0,8);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+// ─── HUD UPDATE ──────────────────────────────────────────────────────────────
+function updateHUD() {
+  const pos  = getPositions().indexOf(player)+1;
+  const lap  = Math.min(player.lap, LAPS);
+  const mph  = Math.round(Math.abs(player.speed)*14);
+  document.getElementById('hudLap').textContent = `LAP ${lap}/${LAPS}`;
+  document.getElementById('hudPos').textContent = `POS ${pos}/${allRacers.length}`;
+  document.getElementById('hudSpd').textContent = `${mph} MPH`;
+}
+
+// ─── FINISH SCREEN ───────────────────────────────────────────────────────────
+function showResult() {
+  const pos = getPositions().indexOf(player) + 1;
+  const r   = document.getElementById('result');
+  r.style.display = 'flex';
+
+  const msgs = [
+    ['WINNER!','#ffe500','🏆 Champion! Perfect ride!'],
+    ['2ND PLACE','#ccc','So close to the top!'],
+    ['3RD PLACE','#cd7f32','On the podium!'],
+    ['4TH PLACE','#aaa','Not bad – try again!'],
+    ['5TH PLACE','#888','Keep practising!'],
+    ['LAST PLACE','#e55','Dead last – rematch?'],
+  ];
+  const [title, col, msg] = msgs[Math.min(pos-1, 5)];
+  document.getElementById('resultTitle').textContent  = title;
+  document.getElementById('resultTitle').style.color  = col;
+  document.getElementById('resultPos').textContent    = ordinal(pos);
+  document.getElementById('resultPos').style.color    = col;
+  document.getElementById('resultMsg').textContent    = msg;
+}
+
+// ─── MAIN LOOP ───────────────────────────────────────────────────────────────
+function loop(ts) {
+  ctx.clearRect(0, 0, W, H);
+
+  if (gamePhase === 'menu') {
+    // draw static track preview
+    ctx.fillStyle = '#2d5a1b';
+    ctx.fillRect(0,0,W,H);
+    if (trackReady) drawTrack();
+  }
+
+  if (gamePhase === 'countdown' || gamePhase === 'racing') {
+    // Background
+    ctx.fillStyle = '#2d5a1b';
+    ctx.fillRect(0,0,W,H);
+    // some grass tufts
+    ctx.fillStyle = '#255018';
+    for (let gx=0;gx<W;gx+=40) for (let gy=0;gy<H;gy+=40) {
+      ctx.fillRect(gx+(gx*13)%11,gy+(gy*7)%9,6,3);
+    }
+
+    drawTrack();
+
+    // draw racers back-to-front (lowest progress first)
+    const sorted = getPositions().slice().reverse();
+    for (const r of sorted) r.draw();
+
+    if (gamePhase === 'racing' && raceStarted) {
+      // Update physics
+      for (const ai of aiList) {
+        const c = aiControl(ai);
+        ai.update(c.accel, c.brake, c.tL, c.tR);
+      }
+      player.update(inp.up, inp.down, inp.left, inp.right);
+
+      // Check finish
+      if (player.finished) {
+        gamePhase = 'done';
+        showResult();
+      }
+    }
+
+    if (gamePhase === 'countdown') {
+      const elapsed = ts - cdLast;
+      if (elapsed >= 1000) {
+        cdTimer--;
+        cdLast = ts;
+        if (cdTimer <= 0) { gamePhase = 'racing'; raceStarted = true; }
+      }
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(0,0,W,H);
+      const txt = cdTimer <= 0 ? 'GO!' : cdTimer.toString();
+      const sz  = Math.min(W,H)*0.22;
+      ctx.font  = `bold ${sz}px monospace`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle    = cdTimer<=0 ? '#0f0' : '#ff0';
+      ctx.shadowColor  = ctx.fillStyle;
+      ctx.shadowBlur   = 30;
+      ctx.fillText(txt, W/2, H/2);
+      ctx.shadowBlur   = 0;
+      ctx.textBaseline = 'alphabetic';
+    }
+
+    updateHUD();
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// ─── BUTTONS ─────────────────────────────────────────────────────────────────
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('hud').style.display = 'flex';
+  initRace();
+});
+document.getElementById('restartBtn').addEventListener('click', () => {
+  initRace();
+});
+
+// ─── BOOT ────────────────────────────────────────────────────────────────────
+document.getElementById('hud').style.display = 'none';
+buildTrack();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
